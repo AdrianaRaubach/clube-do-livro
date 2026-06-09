@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clube do Livro</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { display: ['"Playfair Display"', 'Georgia', 'serif'] }
+                }
+            }
+        }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background-color: #faf6ef;
+            background-image: radial-gradient(circle, #d9c9b0 0.6px, transparent 0.6px);
+            background-size: 28px 28px;
+        }
+        .font-display { font-family: 'Playfair Display', Georgia, serif; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        /* Cards */
+        .book-card { transition: transform 0.25s ease, box-shadow 0.25s ease; }
+        .book-card:hover { transform: translateY(-5px); box-shadow: 0 18px 40px rgba(80,20,30,0.13); }
+        /* Gold accent line */
+        .gold-line {
+            height: 1.5px;
+            background: linear-gradient(90deg, transparent 0%, rgba(201,151,59,0.5) 20%, #d4aa50 50%, rgba(201,151,59,0.5) 80%, transparent 100%);
+        }
+        /* Fade-up animation */
+        @keyframes fadeUp { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
+        .fade-up { animation: fadeUp 0.45s ease forwards; }
+        /* Loading pulse */
+        @keyframes pulse-slow { 0%,100%{transform:scale(1)} 50%{transform:scale(1.1)} }
+        .animate-pulse-slow { animation: pulse-slow 1.8s ease-in-out infinite; }
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-thumb { background: linear-gradient(#c9973b, #e0a87a); border-radius: 99px; }
+        /* Input focus */
+        input:focus, select:focus, textarea:focus { background-color: #fffdf8 !important; }
+    </style>
+</head>
+<body class="min-h-screen">
+
+<!-- Login Screen -->
+<div id="login-screen" class="hidden fixed inset-0 z-[90] flex items-center justify-center p-4"
+    style="background: radial-gradient(ellipse at 60% 30%, #f5ddd4 0%, #faf0e6 40%, #f0e6da 100%)">
+    <div class="w-full max-w-sm fade-up">
+        <div class="text-center mb-7">
+            <div class="inline-flex items-center justify-center w-20 h-20 rounded-full mb-4"
+                style="background: rgba(139,26,46,0.08)">
+                <span class="text-4xl">📚</span>
+            </div>
+            <h1 class="font-display text-3xl font-bold text-stone-800 leading-tight">Clube do Livro</h1>
+            <p class="text-rose-700 text-sm mt-1">das Crises Existenciais</p>
+            <div class="gold-line mt-4 mx-auto w-28"></div>
+            <p class="text-stone-400 text-xs mt-4 italic leading-relaxed px-6">
+                "Uma sala sem livros é como um corpo sem alma."
+            </p>
+            <p class="text-stone-300 text-[11px] mt-1 tracking-wide">— Cícero</p>
+        </div>
+        <div class="bg-white/85 backdrop-blur-md rounded-2xl shadow-lg border border-white/60 p-6">
+            <form onsubmit="login(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-stone-400 uppercase tracking-wide mb-1.5">E-mail</label>
+                    <input type="email" id="login-email" required placeholder="seu@email.com"
+                        class="w-full px-3 py-2.5 border border-stone-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-rose-300">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-stone-400 uppercase tracking-wide mb-1.5">Senha</label>
+                    <input type="password" id="login-password" required placeholder="••••••••"
+                        class="w-full px-3 py-2.5 border border-stone-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-rose-300">
+                </div>
+                <p id="login-error" class="hidden text-red-500 text-xs text-center bg-red-50 rounded-lg py-2 px-3"></p>
+                <button type="submit" id="login-btn"
+                    class="w-full py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-60 tracking-wide text-white"
+                    style="background: linear-gradient(135deg, #7a1525, #a01d30)">
+                    Entrar
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Loading -->
+<div id="loading" class="fixed inset-0 z-[100] flex items-center justify-center bg-[#fdf8f0]">
+    <div class="text-center">
+        <div class="text-6xl animate-pulse-slow">📚</div>
+        <p class="mt-4 text-stone-400 text-sm">Carregando...</p>
+    </div>
+</div>
+
+<!-- Config Warning -->
+<div id="config-warning" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
+    <div class="bg-white rounded-2xl p-8 max-w-md text-center shadow-2xl">
+        <div class="text-5xl mb-4">⚙️</div>
+        <h2 class="font-display text-2xl font-bold text-stone-800 mb-3">Configure o Firebase</h2>
+        <p class="text-stone-500 text-sm leading-relaxed mb-4">
+            Abra o arquivo <code class="bg-stone-100 text-rose-700 px-1.5 py-0.5 rounded">firebase-config.js</code>
+            e preencha com os dados do seu projeto Firebase para começar.
+        </p>
+        <p class="text-xs text-stone-400">Veja as instruções detalhadas dentro do arquivo.</p>
+    </div>
+</div>
+
+<!-- Header -->
+<header class="text-white sticky top-0 z-40 shadow-lg" style="background: linear-gradient(135deg, #6b1219 0%, #8b1a2e 60%, #7a1525 100%)">
+    <div class="max-w-5xl mx-auto px-4">
+        <div class="flex items-center justify-between py-4">
+            <div class="flex items-center gap-3">
+                <span class="text-2xl">📚</span>
+                <div>
+                    <h1 class="font-display text-xl font-bold leading-tight">Clube do Livro das Crises Existenciais</h1>
+                    <p class="text-rose-300 text-[11px]">Tidus ✨</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <span id="user-name" class="text-rose-300 text-xs hidden sm:block max-w-[130px] truncate"></span>
+                <div class="flex flex-col-reverse sm:flex-row items-end sm:items-center gap-1.5 sm:gap-2">
+                    <button onclick="openAddModal()"
+                        class="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white text-sm font-medium px-3 sm:px-4 py-2 rounded-full transition-all">
+                        <span class="text-base leading-none font-bold">+</span>
+                        <span class="hidden sm:inline">Adicionar livro</span>
+                    </button>
+                    <button onclick="logout()" title="Sair"
+                        class="text-rose-300 hover:text-white hover:bg-white/10 px-3 py-2 rounded-full text-sm transition-all">
+                        Sair
+                    </button>
+                </div>
+            </div>
+        </div>
+        <nav class="flex gap-1">
+            <button onclick="showTab('inicio')" id="tab-btn-inicio"
+                class="tab-btn px-4 py-3 text-sm font-medium text-rose-300 border-b-2 border-transparent hover:text-white transition-all">
+                🏠 Início
+            </button>
+            <button onclick="showTab('biblioteca')" id="tab-btn-biblioteca"
+                class="tab-btn px-4 py-3 text-sm font-medium text-rose-300 border-b-2 border-transparent hover:text-white transition-all">
+                📖 Biblioteca
+            </button>
+            <button onclick="showTab('sugestoes')" id="tab-btn-sugestoes"
+                class="tab-btn px-4 py-3 text-sm font-medium text-rose-300 border-b-2 border-transparent hover:text-white transition-all">
+                💡 Sugestões
+            </button>
+        </nav>
+    </div>
+    <div class="gold-line"></div>
+</header>
+
+<!-- Main -->
+<main class="max-w-5xl mx-auto px-4 py-8">
+
+    <!-- Tab: Início -->
+    <section id="content-inicio" class="tab-content">
+        <div id="current-book" class="mb-8"></div>
+        <div>
+            <h2 class="font-display text-xl font-semibold text-stone-800 mb-4">Leituras Recentes</h2>
+            <div id="recent-books" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4"></div>
+        </div>
+    </section>
+
+    <!-- Tab: Biblioteca -->
+    <section id="content-biblioteca" class="tab-content">
+        <div class="flex flex-col sm:flex-row gap-3 mb-6">
+            <input type="text" id="search" placeholder="Buscar livro ou autor..."
+                oninput="renderLibrary()"
+                class="flex-1 px-4 py-2.5 rounded-xl border border-stone-200 bg-white shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-rose-300">
+            <div class="flex gap-2 flex-wrap">
+                <button onclick="setFilter('todos')" data-filter="todos" class="filter-btn px-4 py-2 rounded-full text-sm font-medium transition-all">Todos</button>
+                <button onclick="setFilter('lido')" data-filter="lido" class="filter-btn px-4 py-2 rounded-full text-sm font-medium transition-all">✅ Lidos</button>
+                <button onclick="setFilter('lendo')" data-filter="lendo" class="filter-btn px-4 py-2 rounded-full text-sm font-medium transition-all">📖 Lendo</button>
+                <button onclick="setFilter('proximo')" data-filter="proximo" class="filter-btn px-4 py-2 rounded-full text-sm font-medium transition-all">🔜 Próximos</button>
+            </div>
+        </div>
+        <div id="books-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-5"></div>
+        <div id="library-empty" class="hidden text-center py-16 text-stone-400">
+            <div class="text-5xl mb-3">📭</div>
+            <p class="text-sm">Nenhum livro encontrado</p>
+        </div>
+    </section>
+
+    <!-- Tab: Sugestões -->
+    <section id="content-sugestoes" class="tab-content">
+        <div class="mb-6">
+            <h2 class="font-display text-xl font-semibold text-stone-800">Próximas Leituras</h2>
+            <p class="text-stone-400 text-sm mt-1">Vote nos livros que você quer ler a seguir!</p>
+        </div>
+        <div id="suggestions-list" class="space-y-3"></div>
+        <div id="suggestions-empty" class="hidden text-center py-16 text-stone-400">
+            <div class="text-5xl mb-3">💡</div>
+            <p class="text-sm">Nenhuma sugestão ainda.</p>
+            <button onclick="openAddModal()" class="mt-2 text-rose-600 text-sm underline">
+                Adicionar um livro com status "Próximo" →
+            </button>
+        </div>
+    </section>
+</main>
+
+<!-- ── Add/Edit Modal ─────────────────────────────────────────────────────── -->
+<div id="modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm" onclick="closeModal()"></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between p-5 border-b border-stone-100">
+            <h2 id="modal-title" class="font-display text-lg font-semibold text-stone-800">Adicionar Livro</h2>
+            <button onclick="closeModal()"
+                class="text-stone-400 hover:text-stone-600 w-8 h-8 flex items-center justify-center rounded-full hover:bg-stone-100 text-xl transition-all">&times;</button>
+        </div>
+        <form id="book-form" onsubmit="saveBook(event)" class="p-5 space-y-4">
+            <input type="hidden" id="edit-id">
+
+            <div>
+                <label class="block text-xs font-semibold text-stone-400 uppercase tracking-wide mb-1.5">Título *</label>
+                <input type="text" id="f-titulo" required placeholder="Nome do livro"
+                    class="w-full px-3 py-2.5 border border-stone-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-rose-300">
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-stone-400 uppercase tracking-wide mb-1.5">Autor(a) *</label>
+                <input type="text" id="f-autor" required placeholder="Nome da autora ou autor"
+                    class="w-full px-3 py-2.5 border border-stone-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-rose-300">
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-stone-400 uppercase tracking-wide mb-1.5">URL da Capa</label>
+                <input type="url" id="f-capa" placeholder="https://... (link de uma imagem)"
+                    oninput="previewCover()"
+                    class="w-full px-3 py-2.5 border border-stone-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-rose-300">
+                <img id="cover-preview" src="" alt="Preview" class="hidden mt-2 h-28 rounded-lg object-cover shadow-sm">
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-semibold text-stone-400 uppercase tracking-wide mb-1.5">Status *</label>
+                    <select id="f-status" required
+                        class="w-full px-3 py-2.5 border border-stone-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-rose-300">
+                        <option value="lendo">📖 Lendo agora</option>
+                        <option value="lido">✅ Já lido</option>
+                        <option value="proximo">🔜 Próximo</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-stone-400 uppercase tracking-wide mb-1.5">Mês / Ano</label>
+                    <input type="month" id="f-mes"
+                        class="w-full px-3 py-2.5 border border-stone-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-rose-300">
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-semibold text-stone-400 uppercase tracking-wide mb-1.5">Gênero do Autor</label>
+                    <select id="f-genero-autor"
+                        class="w-full px-3 py-2.5 border border-stone-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-rose-300">
+                        <option value="">Não informado</option>
+                        <option value="Feminino">Feminino</option>
+                        <option value="Masculino">Masculino</option>
+                        <option value="Misto">Misto</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-stone-400 uppercase tracking-wide mb-1.5">País</label>
+                    <input type="text" id="f-pais" placeholder="Ex: Brasil, França..."
+                        class="w-full px-3 py-2.5 border border-stone-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-rose-300">
+                </div>
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-stone-400 uppercase tracking-wide mb-1.5">Gênero Literário</label>
+                <input type="text" id="f-genero-literario" placeholder="Ex: Romance, Ficção, Gótico..."
+                    class="w-full px-3 py-2.5 border border-stone-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-rose-300">
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-stone-400 uppercase tracking-wide mb-1.5">Sinopse</label>
+                <textarea id="f-comentarios" rows="3" placeholder="Digite a sinopse do livro"
+                    class="w-full px-3 py-2.5 border border-stone-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-rose-300 resize-none"></textarea>
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-stone-400 uppercase tracking-wide mb-1.5">Sugerido por</label>
+                <input type="text" id="f-sugerido" placeholder="Nome de quem sugeriu"
+                    class="w-full px-3 py-2.5 border border-stone-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-rose-300">
+            </div>
+            <div class="flex gap-3 pt-1">
+                <button type="submit" id="save-btn"
+                    class="flex-1 bg-rose-800 hover:bg-rose-900 text-white py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-60">
+                    Salvar
+                </button>
+                <button type="button" onclick="closeModal()"
+                    class="px-5 py-2.5 border border-stone-200 text-stone-600 rounded-xl text-sm hover:bg-stone-50 transition-colors">
+                    Cancelar
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ── Detail Modal ───────────────────────────────────────────────────────── -->
+<div id="detail-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm" onclick="closeDetail()"></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div id="detail-content" class="p-6"></div>
+    </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] pointer-events-none">
+    <div class="bg-stone-800 text-white px-5 py-3 rounded-full shadow-xl text-sm font-medium whitespace-nowrap">
+        <span id="toast-msg"></span>
+    </div>
+</div>
+
+<script src="firebase-config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
