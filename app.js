@@ -4,11 +4,15 @@
 let db        = null;
 let books     = [];
 let activeFilter = 'todos';
+let sortOrder = 'desc';
+let suggestionReactionFilter = null;
 let starVal   = 0;
 let editingId = null;
 let toastTimer = null;
 let currentUser = null;
 let detailStarVal = 0;
+let posts = [];
+const expandedComments = new Set();
 
 const REACOES = [
     { emoji: '😍', label: 'Amei a ideia!' },
@@ -37,8 +41,17 @@ function initApp() {
                 currentUser = user;
                 const nameEl = document.getElementById('user-name');
                 if (nameEl) nameEl.textContent = user.displayName || user.email.split('@')[0];
+                const nome = user.displayName || user.email.split('@')[0];
+                const avatarEl = document.getElementById('compose-avatar');
+                if (avatarEl) {
+                    const [bg, txt] = avatarColors(nome);
+                    avatarEl.style.background = bg;
+                    avatarEl.style.color = txt;
+                    avatarEl.textContent = initials(nome);
+                }
                 hide('login-screen');
                 listenBooks();
+                listenPosts();
             } else {
                 currentUser = null;
                 hide('loading');
@@ -167,7 +180,10 @@ function renderCurrentBook() {
 
 function renderRecent() {
     const el = document.getElementById('recent-books');
-    const recent = books.filter(b => b.status === 'lido').slice(0, 4);
+    const recent = books
+        .filter(b => b.status === 'lido')
+        .sort((a, b) => (b.dataTermino || '').localeCompare(a.dataTermino || ''))
+        .slice(0, 4);
     if (!recent.length) {
         el.innerHTML = `<p class="col-span-full text-stone-400 text-sm text-center py-6">Nenhuma leitura concluída ainda.</p>`;
         return;
@@ -176,6 +192,22 @@ function renderRecent() {
 }
 
 // ── Render: Library ───────────────────────────────────────────────────────────
+function sortedBooks(arr) {
+    return [...arr].sort((a, b) => {
+        const da = a.dataTermino || '';
+        const db = b.dataTermino || '';
+        if (!da && !db) return 0;
+        if (!da) return 1;
+        if (!db) return -1;
+        return sortOrder === 'desc' ? db.localeCompare(da) : da.localeCompare(db);
+    });
+}
+
+function toggleSort() {
+    sortOrder = sortOrder === 'desc' ? 'asc' : 'desc';
+    renderLibrary();
+}
+
 function renderLibrary() {
     const search = (document.getElementById('search')?.value || '').toLowerCase().trim();
     let filtered = activeFilter === 'todos' ? books : books.filter(b => b.status === activeFilter);
@@ -185,6 +217,7 @@ function renderLibrary() {
             b.autor?.toLowerCase().includes(search)
         );
     }
+    filtered = sortedBooks(filtered);
 
     const grid = document.getElementById('books-grid');
     const empty = document.getElementById('library-empty');
@@ -204,6 +237,9 @@ function renderLibrary() {
                 ? 'bg-rose-800 text-white shadow-sm'
                 : 'bg-white text-stone-600 border border-stone-200 hover:border-rose-300');
     });
+
+    const sortBtn = document.getElementById('sort-btn');
+    if (sortBtn) sortBtn.textContent = sortOrder === 'desc' ? '↓ Leituras recentes' : '↑ Leituras antigas';
 }
 
 function setFilter(f) {
@@ -211,13 +247,45 @@ function setFilter(f) {
     renderLibrary();
 }
 
+function countReaction(book, emoji) {
+    return Object.values(book.reacoes || {}).filter(r => r.emoji === emoji).length;
+}
+
+function setSuggestionFilter(emoji) {
+    suggestionReactionFilter = suggestionReactionFilter === emoji ? null : emoji;
+    renderSuggestions();
+}
+
 // ── Render: Suggestions ───────────────────────────────────────────────────────
 function renderSuggestions() {
     const list  = document.getElementById('suggestions-list');
     const empty = document.getElementById('suggestions-empty');
-    const sugs  = books
-        .filter(b => b.status === 'proximo')
-        .sort((a, b) => Object.keys(b.reacoes || {}).length - Object.keys(a.reacoes || {}).length);
+    const allSugs = books.filter(b => b.status === 'proximo');
+
+    const filtersEl = document.getElementById('reaction-filters');
+    if (filtersEl) {
+        filtersEl.innerHTML = `<span class="self-center text-xs font-semibold text-stone-400 uppercase tracking-wide mr-1">Filtrar por reação:</span>` + REACOES.map(r => {
+            const total   = allSugs.reduce((sum, b) => sum + countReaction(b, r.emoji), 0);
+            const active  = suggestionReactionFilter === r.emoji;
+            return `
+            <button onclick="setSuggestionFilter('${r.emoji}')" title="${r.label}"
+                class="flex items-center gap-1.5 px-3 py-2 rounded-full text-sm font-medium transition-all border
+                    ${active
+                        ? 'bg-rose-800 text-white border-rose-800 shadow-sm'
+                        : 'bg-white text-stone-600 border-stone-200 hover:border-rose-300'}">
+                <span>${r.emoji}</span>
+                <span class="text-xs">${r.label}</span>
+                ${total ? `<span class="text-xs font-bold ${active ? 'text-rose-200' : 'text-stone-400'}">${total}</span>` : ''}
+            </button>`;
+        }).join('');
+    }
+
+    const sugs = allSugs.sort((a, b) => {
+        if (suggestionReactionFilter) {
+            return countReaction(b, suggestionReactionFilter) - countReaction(a, suggestionReactionFilter);
+        }
+        return Object.keys(b.reacoes || {}).length - Object.keys(a.reacoes || {}).length;
+    });
 
     if (!sugs.length) {
         list.innerHTML = '';
@@ -315,16 +383,18 @@ function avaliacoesSection(book) {
     const myAv  = myUid ? avs[myUid] : null;
     detailStarVal = myAv?.estrelas || 0;
 
-    const othersHtml = Object.entries(avs)
-        .filter(([uid]) => uid !== myUid)
-        .map(([, av]) => `
-            <div class="flex items-start justify-between mb-3">
+    const allReviewsHtml = Object.entries(avs)
+        .map(([uid, av]) => {
+            const isMe = uid === myUid;
+            return `
+            <div class="flex items-start justify-between mb-3 ${isMe ? 'bg-rose-50 rounded-xl px-2 py-1.5 -mx-2' : ''}">
                 <div>
-                    <span class="text-xs font-semibold text-stone-600">${esc(av.nome)}</span>
+                    <span class="text-xs font-semibold text-stone-600">${esc(av.nome)}${isMe ? ' <span class="text-rose-400 font-normal">(você)</span>' : ''}</span>
                     ${av.comentario ? `<p class="text-stone-400 text-xs mt-0.5 italic">"${esc(av.comentario)}"</p>` : ''}
                 </div>
                 <div class="text-sm leading-none flex-shrink-0 ml-3" style="color:#f59e0b">${'★'.repeat(av.estrelas)}<span style="color:#e5e7eb">${'★'.repeat(5 - av.estrelas)}</span></div>
-            </div>`).join('');
+            </div>`;
+        }).join('');
 
     const myStarsHtml = [1, 2, 3, 4, 5].map(v => `
         <span class="detail-star text-2xl cursor-pointer select-none transition-transform hover:scale-110"
@@ -337,7 +407,7 @@ function avaliacoesSection(book) {
     return `
     <div class="mt-4 pt-4 border-t border-stone-100">
         <p class="text-xs font-semibold text-stone-400 uppercase tracking-wide mb-3">Avaliações</p>
-        ${othersHtml || (!myAv ? '<p class="text-xs text-stone-300 mb-3">Nenhuma avaliação ainda. Seja a primeira!</p>' : '')}
+        ${allReviewsHtml || '<p class="text-xs text-stone-300 mb-3">Nenhuma avaliação ainda. Seja a primeira!</p>'}
         <div class="bg-stone-50 rounded-xl p-3">
             <p class="text-xs font-semibold text-stone-500 mb-2">${esc(currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Você')}:</p>
             <div class="flex gap-0.5 mb-2">${myStarsHtml}</div>
@@ -416,6 +486,8 @@ function openDetail(id) {
                 <h2 class="font-display text-xl font-bold text-stone-900 leading-tight">${esc(b.titulo)}</h2>
                 <p class="text-stone-500 text-sm mt-1">${esc(b.autor)}</p>
                 ${b.mes ? `<p class="text-stone-400 text-xs mt-1">📅 ${fmtMonth(b.mes)}</p>` : ''}
+                ${b.dataInicio ? `<p class="text-stone-400 text-xs mt-0.5">▶️ Início: ${fmtDate(b.dataInicio)}</p>` : ''}
+                ${b.dataTermino ? `<p class="text-stone-400 text-xs mt-0.5">✅ Término: ${fmtDate(b.dataTermino)}</p>` : ''}
                 ${(b.generoLiterario || b.pais || b.generoAutor) ? `
                 <div class="flex flex-wrap gap-1.5 mt-2">
                     ${b.generoLiterario ? `<span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700">${esc(b.generoLiterario)}</span>` : ''}
@@ -455,12 +527,22 @@ function closeDetail() {
 }
 
 // ── Add/Edit Modal ────────────────────────────────────────────────────────────
+function updateDateFields() {
+    const status = document.getElementById('f-status').value;
+    const showInicio  = status === 'lendo' || status === 'lido';
+    const showTermino = status === 'lido';
+    document.getElementById('date-fields-grid').classList.toggle('hidden', !showInicio);
+    document.getElementById('wrap-data-inicio').classList.toggle('hidden', !showInicio);
+    document.getElementById('wrap-data-termino').classList.toggle('hidden', !showTermino);
+}
+
 function openAddModal() {
     editingId = null;
     document.getElementById('modal-title').textContent = 'Adicionar Livro';
     document.getElementById('book-form').reset();
     document.getElementById('edit-id').value = '';
     document.getElementById('cover-preview').classList.add('hidden');
+    updateDateFields();
     show('modal');
 }
 
@@ -477,6 +559,9 @@ function openEditModal(id) {
     document.getElementById('f-capa').value = b.capaUrl || '';
     document.getElementById('f-status').value = b.status || 'proximo';
     document.getElementById('f-mes').value = b.mes || '';
+    document.getElementById('f-data-inicio').value = b.dataInicio || '';
+    document.getElementById('f-data-termino').value = b.dataTermino || '';
+    updateDateFields();
     document.getElementById('f-genero-autor').value = b.generoAutor || '';
     document.getElementById('f-genero-literario').value = b.generoLiterario || '';
     document.getElementById('f-pais').value = b.pais || '';
@@ -540,6 +625,8 @@ async function saveBook(e) {
         capaUrl:     document.getElementById('f-capa').value.trim(),
         status:      document.getElementById('f-status').value,
         mes:         document.getElementById('f-mes').value,
+        dataInicio:  document.getElementById('f-data-inicio').value,
+        dataTermino: document.getElementById('f-data-termino').value,
         generoAutor:    document.getElementById('f-genero-autor').value,
         generoLiterario: document.getElementById('f-genero-literario').value.trim(),
         pais:           document.getElementById('f-pais').value.trim(),
@@ -633,10 +720,203 @@ async function setReaction(bookId, emoji) {
     }
 }
 
+// ── Posts ─────────────────────────────────────────────────────────────────────
+function listenPosts() {
+    db.collection('postagens')
+        .orderBy('createdAt', 'desc')
+        .onSnapshot(
+            snap => {
+                posts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                renderPosts();
+            },
+            err => console.error(err)
+        );
+}
+
+function renderPosts() {
+    const feed = document.getElementById('posts-feed');
+    if (!feed) return;
+    if (!posts.length) {
+        feed.innerHTML = `
+        <div class="text-center py-16 text-stone-400">
+            <div class="text-5xl mb-3">✍️</div>
+            <p class="text-sm">Nenhuma postagem ainda. Seja o primeiro!</p>
+        </div>`;
+        return;
+    }
+    feed.innerHTML = posts.map(p => postCard(p)).join('');
+}
+
+function postCard(p) {
+    const curtidas = p.curtidas || {};
+    const liked = currentUser && curtidas[currentUser.uid];
+    const likeCount = Object.keys(curtidas).length;
+    const comments = p.comentarios || [];
+    const isExpanded = expandedComments.has(p.id);
+    const [bgColor, textColor] = avatarColors(p.autorNome);
+
+    const commentsHtml = isExpanded ? `
+    <div class="mt-3 pt-3 border-t border-stone-100">
+        ${comments.length ? comments.map(c => {
+            const [cbg, ctxt] = avatarColors(c.autorNome);
+            return `
+            <div class="flex gap-2 mb-2.5">
+                <div class="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-bold"
+                    style="background:${cbg}; color:${ctxt}">${esc(initials(c.autorNome))}</div>
+                <div class="flex-1 bg-stone-50 rounded-xl px-3 py-2">
+                    <span class="text-xs font-semibold text-stone-700">${esc(c.autorNome)}</span>
+                    <span class="text-[10px] text-stone-400 ml-1.5">${relTime(c.createdAt)}</span>
+                    <p class="text-sm text-stone-600 mt-0.5 leading-snug">${esc(c.texto)}</p>
+                </div>
+            </div>`;
+        }).join('') : '<p class="text-xs text-stone-400 mb-3">Nenhum comentário ainda.</p>'}
+        <div class="flex gap-2 mt-2">
+            <input type="text" id="comment-input-${p.id}" placeholder="Escreva um comentário..."
+                onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();submitComment('${p.id}')}"
+                class="flex-1 px-3 py-2 border border-stone-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-rose-300">
+            <button onclick="submitComment('${p.id}')"
+                class="px-4 py-2 bg-rose-800 text-white text-sm font-medium rounded-xl hover:bg-rose-900 transition-colors">
+                Enviar
+            </button>
+        </div>
+    </div>` : '';
+
+    return `
+    <div class="bg-white rounded-2xl shadow-sm border border-stone-100 p-4 fade-up">
+        <div class="flex items-start justify-between mb-3">
+            <div class="flex items-center gap-2.5">
+                <div class="w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-sm font-bold"
+                    style="background:${bgColor}; color:${textColor}">${esc(initials(p.autorNome))}</div>
+                <div>
+                    <p class="text-sm font-semibold text-stone-800">${esc(p.autorNome)}</p>
+                    <p class="text-[11px] text-stone-400">${relTime(p.createdAt)}</p>
+                </div>
+            </div>
+            ${p.autorUid === currentUser?.uid ? `
+            <button onclick="deletePost('${p.id}')"
+                class="text-stone-300 hover:text-red-400 transition-colors text-xs px-2 py-1 rounded-lg hover:bg-red-50">
+                🗑️
+            </button>` : ''}
+        </div>
+        <p class="text-stone-700 text-sm leading-relaxed whitespace-pre-wrap">${esc(p.texto)}</p>
+        <div class="flex items-center gap-5 mt-3 pt-3 border-t border-stone-100">
+            <button onclick="toggleLike('${p.id}')"
+                class="flex items-center gap-1.5 text-sm transition-all ${liked ? 'text-rose-600 font-semibold' : 'text-stone-400 hover:text-rose-500'}">
+                <span class="text-base leading-none">${liked ? '♥' : '♡'}</span>
+                <span>${likeCount || ''}</span>
+            </button>
+            <button onclick="toggleComments('${p.id}')"
+                class="flex items-center gap-1.5 text-sm transition-all ${isExpanded ? 'text-rose-600 font-semibold' : 'text-stone-400 hover:text-rose-500'}">
+                <span class="text-base leading-none">💬</span>
+                <span>${comments.length || ''}</span>
+            </button>
+        </div>
+        ${commentsHtml}
+    </div>`;
+}
+
+async function submitPost() {
+    if (!db || !currentUser) return;
+    const textarea = document.getElementById('post-textarea');
+    const texto = textarea?.value.trim();
+    if (!texto) { toast('Escreva algo antes de publicar.'); return; }
+
+    const btn = document.getElementById('post-btn');
+    btn.disabled = true;
+    btn.textContent = 'Publicando...';
+
+    try {
+        await db.collection('postagens').add({
+            texto,
+            autorUid: currentUser.uid,
+            autorNome: currentUser.displayName || currentUser.email.split('@')[0],
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            curtidas: {},
+            comentarios: [],
+        });
+        textarea.value = '';
+        toast('Postagem publicada! ✨');
+    } catch (err) {
+        console.error(err);
+        toast('Erro ao publicar.');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Publicar';
+    }
+}
+
+async function toggleLike(postId) {
+    if (!db || !currentUser) return;
+    const post = posts.find(p => p.id === postId);
+    const liked = post?.curtidas?.[currentUser.uid];
+    const nome = currentUser.displayName || currentUser.email.split('@')[0];
+    const update = {};
+    if (liked) {
+        update[`curtidas.${currentUser.uid}`] = firebase.firestore.FieldValue.delete();
+    } else {
+        update[`curtidas.${currentUser.uid}`] = nome;
+    }
+    try {
+        await db.collection('postagens').doc(postId).update(update);
+    } catch (err) {
+        console.error(err);
+        toast('Erro ao curtir.');
+    }
+}
+
+function toggleComments(postId) {
+    if (expandedComments.has(postId)) {
+        expandedComments.delete(postId);
+    } else {
+        expandedComments.add(postId);
+    }
+    renderPosts();
+}
+
+async function submitComment(postId) {
+    if (!db || !currentUser) return;
+    const input = document.getElementById('comment-input-' + postId);
+    const texto = input?.value.trim();
+    if (!texto) return;
+
+    const nome = currentUser.displayName || currentUser.email.split('@')[0];
+    try {
+        await db.collection('postagens').doc(postId).update({
+            comentarios: firebase.firestore.FieldValue.arrayUnion({
+                texto,
+                autorUid: currentUser.uid,
+                autorNome: nome,
+                createdAt: new Date().toISOString(),
+            }),
+        });
+        if (input) input.value = '';
+    } catch (err) {
+        console.error(err);
+        toast('Erro ao comentar.');
+    }
+}
+
+async function deletePost(postId) {
+    if (!confirm('Remover esta postagem?')) return;
+    try {
+        await db.collection('postagens').doc(postId).delete();
+        toast('Postagem removida.');
+    } catch {
+        toast('Erro ao remover.');
+    }
+}
+
 async function quickStatusChange(bookId, newStatus) {
     if (!db) return;
+    const today = new Date().toISOString().split('T')[0];
+    const book  = books.find(b => b.id === bookId);
+    const update = { status: newStatus };
+
+    if (newStatus === 'lendo' && !book?.dataInicio) update.dataInicio = today;
+    if (newStatus === 'lido'  && !book?.dataTermino) update.dataTermino = today;
+
     try {
-        await db.collection('livros').doc(bookId).update({ status: newStatus });
+        await db.collection('livros').doc(bookId).update(update);
         toast(newStatus === 'lido' ? 'Marcado como lido! ✅' : 'Boa leitura! 📖');
     } catch (err) {
         console.error(err);
@@ -645,11 +925,42 @@ async function quickStatusChange(bookId, newStatus) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+function relTime(ts) {
+    if (!ts) return '';
+    const date = ts.toDate ? ts.toDate() : new Date(ts);
+    const diff = Math.floor((Date.now() - date.getTime()) / 1000);
+    if (diff < 60) return 'agora mesmo';
+    if (diff < 3600) return `há ${Math.floor(diff / 60)} min`;
+    if (diff < 86400) return `há ${Math.floor(diff / 3600)}h`;
+    if (diff < 604800) return `há ${Math.floor(diff / 86400)} dias`;
+    return date.toLocaleDateString('pt-BR');
+}
+
+function initials(nome) {
+    if (!nome) return '?';
+    return nome.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
+}
+
+function avatarColors(nome) {
+    const palettes = [
+        ['#fde8d8','#c04040'], ['#e8d8fe','#7040c0'], ['#d8fde8','#408040'],
+        ['#d8e8fd','#4060c0'], ['#fdd8e8','#c04080'], ['#fefed8','#707020'],
+    ];
+    const idx = (nome || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0) % palettes.length;
+    return palettes[idx];
+}
+
 function esc(str) {
     if (!str) return '';
     return String(str)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;')
         .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function fmtDate(val) {
+    if (!val) return '';
+    const [y, m, d] = val.split('-');
+    return `${d}/${m}/${y}`;
 }
 
 function fmtMonth(val) {
