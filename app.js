@@ -13,6 +13,7 @@ let currentUser = null;
 let detailStarVal = 0;
 let posts = [];
 const expandedComments = new Set();
+let pendingImage = null;
 
 const REACOES = [
     { emoji: '😍', label: 'Amei a ideia!' },
@@ -798,7 +799,8 @@ function postCard(p) {
                 🗑️
             </button>` : ''}
         </div>
-        <p class="text-stone-700 text-sm leading-relaxed whitespace-pre-wrap">${esc(p.texto)}</p>
+        ${p.texto ? `<p class="text-stone-700 text-sm leading-relaxed whitespace-pre-wrap">${esc(p.texto)}</p>` : ''}
+        ${p.imagemUrl ? `<img src="${esc(p.imagemUrl)}" class="mt-3 w-full rounded-xl object-cover max-h-80" loading="lazy">` : ''}
         <div class="flex items-center gap-5 mt-3 pt-3 border-t border-stone-100">
             <button onclick="toggleLike('${p.id}')"
                 class="flex items-center gap-1.5 text-sm transition-all ${liked ? 'text-rose-600 font-semibold' : 'text-stone-400 hover:text-rose-500'}">
@@ -815,26 +817,57 @@ function postCard(p) {
     </div>`;
 }
 
+function selectImage(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    pendingImage = file;
+    const reader = new FileReader();
+    reader.onload = e => {
+        document.getElementById('image-preview').src = e.target.result;
+        document.getElementById('image-preview-wrap').classList.remove('hidden');
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
+}
+
+function removeImage() {
+    pendingImage = null;
+    document.getElementById('image-preview').src = '';
+    document.getElementById('image-preview-wrap').classList.add('hidden');
+}
+
 async function submitPost() {
     if (!db || !currentUser) return;
     const textarea = document.getElementById('post-textarea');
     const texto = textarea?.value.trim();
-    if (!texto) { toast('Escreva algo antes de publicar.'); return; }
+    if (!texto && !pendingImage) { toast('Escreva algo ou adicione uma imagem.'); return; }
 
     const btn = document.getElementById('post-btn');
     btn.disabled = true;
     btn.textContent = 'Publicando...';
 
     try {
-        await db.collection('postagens').add({
+        let imagemUrl = null;
+        if (pendingImage) {
+            const ext = pendingImage.name.split('.').pop();
+            const ref = firebase.storage().ref(`postagens/${currentUser.uid}_${Date.now()}.${ext}`);
+            await ref.put(pendingImage);
+            imagemUrl = await ref.getDownloadURL();
+        }
+
+        const post = {
             texto,
             autorUid: currentUser.uid,
             autorNome: currentUser.displayName || currentUser.email.split('@')[0],
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
             curtidas: {},
             comentarios: [],
-        });
+        };
+        if (imagemUrl) post.imagemUrl = imagemUrl;
+
+        await db.collection('postagens').add(post);
         textarea.value = '';
+        removeImage();
         toast('Postagem publicada! ✨');
     } catch (err) {
         console.error(err);

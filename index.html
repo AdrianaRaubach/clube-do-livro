@@ -21,6 +21,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
     <style>
         body {
             font-family: 'Inter', system-ui, sans-serif;
@@ -227,7 +228,19 @@
                         <textarea id="post-textarea" rows="3"
                             placeholder="Compartilhe seus pensamentos sobre livros..."
                             class="w-full px-3 py-2.5 border border-stone-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-rose-300 resize-none"></textarea>
-                        <div class="flex justify-end mt-2">
+                        <div id="image-preview-wrap" class="hidden mt-2 relative">
+                            <img id="image-preview" class="max-h-48 rounded-xl object-cover border border-stone-200">
+                            <button onclick="removeImage()" type="button"
+                                class="absolute top-1.5 right-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full w-6 h-6 text-sm flex items-center justify-center transition-colors">
+                                &times;
+                            </button>
+                        </div>
+                        <div class="flex items-center justify-between mt-2">
+                            <button onclick="document.getElementById('image-input').click()" type="button"
+                                class="flex items-center gap-1.5 text-stone-400 hover:text-rose-700 text-xs font-medium px-2.5 py-1.5 rounded-lg hover:bg-rose-50 transition-colors">
+                                🖼️ Imagem
+                            </button>
+                            <input type="file" id="image-input" accept="image/*" class="hidden" onchange="selectImage(event)">
                             <button id="post-btn" onclick="submitPost()"
                                 class="px-5 py-2 bg-rose-800 hover:bg-rose-900 text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-60">
                                 Publicar
