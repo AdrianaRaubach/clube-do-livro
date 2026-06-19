@@ -14,6 +14,8 @@ let detailStarVal = 0;
 let posts = [];
 const expandedComments = new Set();
 let pendingImage = null;
+let encontros = [];
+let editingMeetingId = null;
 
 const REACOES = [
     { emoji: '😍', label: 'Amei a ideia!' },
@@ -53,6 +55,7 @@ function initApp() {
                 hide('login-screen');
                 listenBooks();
                 listenPosts();
+                listenEncontros();
             } else {
                 currentUser = null;
                 hide('loading');
@@ -117,6 +120,7 @@ function renderAll() {
     renderHome();
     renderLibrary();
     renderSuggestions();
+    renderCalendario();
 }
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
@@ -954,6 +958,178 @@ async function quickStatusChange(bookId, newStatus) {
     } catch (err) {
         console.error(err);
         toast('Erro ao atualizar status.');
+    }
+}
+
+// ── Calendar / Encontros ──────────────────────────────────────────────────────
+function listenEncontros() {
+    db.collection('encontros')
+        .orderBy('data', 'asc')
+        .onSnapshot(
+            snap => {
+                encontros = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                renderCalendario();
+            },
+            err => console.error(err)
+        );
+}
+
+function renderCalendario() {
+    const list  = document.getElementById('meetings-list');
+    const empty = document.getElementById('meetings-empty');
+    if (!list) return;
+
+    if (!encontros.length) {
+        list.innerHTML = '';
+        empty.classList.remove('hidden');
+        return;
+    }
+    empty.classList.add('hidden');
+
+    const today = new Date().toISOString().split('T')[0];
+    const upcoming = encontros.filter(e => e.data >= today);
+    const past     = encontros.filter(e => e.data < today).reverse();
+
+    let html = '';
+
+    if (upcoming.length) {
+        html += `<div class="mb-3"><span class="text-xs font-bold uppercase tracking-wider text-rose-700 bg-rose-50 px-3 py-1 rounded-full">Próximos encontros</span></div>`;
+        html += upcoming.map(e => meetingCard(e, false)).join('');
+    }
+
+    if (past.length) {
+        html += `<div class="${upcoming.length ? 'mt-8' : ''} mb-3"><span class="text-xs font-bold uppercase tracking-wider text-stone-400 bg-stone-100 px-3 py-1 rounded-full">Encontros realizados</span></div>`;
+        html += past.map(e => meetingCard(e, true)).join('');
+    }
+
+    list.innerHTML = html;
+}
+
+function meetingCard(e, isPast) {
+    const book    = books.find(b => b.id === e.livroId);
+    const dateObj = new Date(e.data + 'T12:00:00');
+    const day     = String(dateObj.getDate()).padStart(2, '0');
+    const months  = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    const weekdays = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+    const month   = months[dateObj.getMonth()];
+    const year    = dateObj.getFullYear();
+    const weekday = weekdays[dateObj.getDay()];
+
+    const canEdit = currentUser && (e.criadoPorUid === currentUser.uid);
+
+    return `
+    <div class="bg-white rounded-2xl shadow-sm border ${isPast ? 'border-stone-100' : 'border-rose-100'} p-4 book-card flex gap-4 ${isPast ? 'opacity-60' : ''}">
+        <div class="flex-shrink-0 w-14 text-center">
+            <div class="rounded-t-xl px-2 py-1" style="background: linear-gradient(135deg,#6b1219,#8b1a2e)">
+                <p class="text-[10px] font-bold uppercase text-white">${month}</p>
+            </div>
+            <div class="border border-t-0 border-stone-200 rounded-b-xl px-2 py-1.5">
+                <p class="text-2xl font-display font-bold text-stone-800 leading-none">${day}</p>
+                <p class="text-[10px] text-stone-400">${weekday}</p>
+            </div>
+            <p class="text-[10px] text-stone-300 mt-1">${year}</p>
+        </div>
+        <div class="flex-1 min-w-0 flex gap-3">
+            ${book ? bookCover(book, 'w-12 h-16 flex-shrink-0 rounded-lg shadow') : '<div class="w-12 h-16 bg-stone-100 rounded-lg flex-shrink-0"></div>'}
+            <div class="flex-1 min-w-0">
+                <h3 class="font-display text-base font-semibold text-stone-800 leading-tight line-clamp-1">
+                    ${esc(e.livroTitulo || book?.titulo || 'Livro não encontrado')}
+                </h3>
+                ${e.horario ? `<p class="text-stone-500 text-xs font-medium mt-0.5">🕐 ${esc(e.horario)}</p>` : ''}
+                ${e.capitulos ? `<p class="text-rose-700 text-sm font-medium mt-0.5">📖 ${esc(e.capitulos)}</p>` : ''}
+                ${e.descricao  ? `<p class="text-stone-400 text-xs mt-1 line-clamp-2">${esc(e.descricao)}</p>` : ''}
+                <p class="text-stone-300 text-[11px] mt-1">por ${esc(e.criadoPorNome || '')}</p>
+            </div>
+        </div>
+        ${canEdit ? `
+        <div class="flex-shrink-0 flex flex-col gap-1.5 ml-1">
+            <button onclick="openEditMeeting('${e.id}')" class="text-stone-300 hover:text-rose-700 transition-colors text-sm" title="Editar">✏️</button>
+            <button onclick="deleteMeeting('${e.id}')" class="text-stone-300 hover:text-red-400 transition-colors text-sm" title="Excluir">🗑️</button>
+        </div>` : ''}
+    </div>`;
+}
+
+function openMeetingModal(id) {
+    editingMeetingId = id || null;
+    document.getElementById('meeting-modal-title').textContent = id ? 'Editar Encontro' : 'Novo Encontro';
+
+    const bookSelect = document.getElementById('m-livro');
+    const sorted = [...books].sort((a, b) => {
+        const order = { lendo: 0, proximo: 1, lido: 2 };
+        return (order[a.status] ?? 3) - (order[b.status] ?? 3);
+    });
+    const statusEmoji = { lendo: '📖', proximo: '🔜', lido: '✅' };
+    bookSelect.innerHTML = '<option value="">Selecione um livro</option>' +
+        sorted.map(b => `<option value="${b.id}">${statusEmoji[b.status] || ''} ${esc(b.titulo)}</option>`).join('');
+
+    if (id) {
+        const e = encontros.find(x => x.id === id);
+        if (e) {
+            document.getElementById('m-data').value      = e.data || '';
+            document.getElementById('m-horario').value   = e.horario || '';
+            document.getElementById('m-livro').value     = e.livroId || '';
+            document.getElementById('m-capitulos').value = e.capitulos || '';
+            document.getElementById('m-descricao').value = e.descricao || '';
+        }
+    } else {
+        document.getElementById('meeting-form').reset();
+    }
+
+    show('meeting-modal');
+}
+
+function openEditMeeting(id) { openMeetingModal(id); }
+
+function closeMeetingModal() { hide('meeting-modal'); }
+
+async function saveMeeting(e) {
+    e.preventDefault();
+    if (!db || !currentUser) return;
+
+    const btn = document.getElementById('meeting-save-btn');
+    btn.disabled = true;
+    btn.textContent = 'Salvando...';
+
+    const livroId = document.getElementById('m-livro').value;
+    const book    = books.find(b => b.id === livroId);
+
+    const data = {
+        data:        document.getElementById('m-data').value,
+        horario:     document.getElementById('m-horario').value,
+        livroId,
+        livroTitulo: book?.titulo || '',
+        capitulos:   document.getElementById('m-capitulos').value.trim(),
+        descricao:   document.getElementById('m-descricao').value.trim(),
+    };
+
+    try {
+        if (editingMeetingId) {
+            await db.collection('encontros').doc(editingMeetingId).update(data);
+            toast('Encontro atualizado! ✅');
+        } else {
+            data.criadoPorUid  = currentUser.uid;
+            data.criadoPorNome = currentUser.displayName || currentUser.email.split('@')[0];
+            data.createdAt     = firebase.firestore.FieldValue.serverTimestamp();
+            await db.collection('encontros').add(data);
+            toast('Encontro agendado! 📅');
+        }
+        closeMeetingModal();
+    } catch (err) {
+        console.error(err);
+        toast('Erro ao salvar encontro.');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Salvar';
+    }
+}
+
+async function deleteMeeting(id) {
+    if (!confirm('Remover este encontro?')) return;
+    try {
+        await db.collection('encontros').doc(id).delete();
+        toast('Encontro removido.');
+    } catch {
+        toast('Erro ao remover.');
     }
 }
 
