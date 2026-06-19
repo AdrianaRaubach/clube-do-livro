@@ -1054,13 +1054,9 @@ function openMeetingModal(id) {
     document.getElementById('meeting-modal-title').textContent = id ? 'Editar Encontro' : 'Novo Encontro';
 
     const bookSelect = document.getElementById('m-livro');
-    const sorted = [...books].sort((a, b) => {
-        const order = { lendo: 0, proximo: 1, lido: 2 };
-        return (order[a.status] ?? 3) - (order[b.status] ?? 3);
-    });
-    const statusEmoji = { lendo: '📖', proximo: '🔜', lido: '✅' };
+    const lendo = books.filter(b => b.status === 'lendo');
     bookSelect.innerHTML = '<option value="">Selecione um livro</option>' +
-        sorted.map(b => `<option value="${b.id}">${statusEmoji[b.status] || ''} ${esc(b.titulo)}</option>`).join('');
+        lendo.map(b => `<option value="${b.id}">${esc(b.titulo)}</option>`).join('');
 
     if (id) {
         const e = encontros.find(x => x.id === id);
