@@ -24,6 +24,15 @@ const REACOES = [
     { emoji: '😩', label: 'Prefiro não' },
 ];
 
+const REACOES_POST = [
+    { emoji: '❤️', label: 'Curtir' },
+    { emoji: '😍', label: 'Amei' },
+    { emoji: '🥹', label: 'Me emocionei' },
+    { emoji: '🫙', label: 'Guardar num potinho' },
+    { emoji: '🥺', label: 'Muito fofo' },
+    { emoji: '😂', label: 'Hahaha' },
+];
+
 // ── Firebase Init ─────────────────────────────────────────────────────────────
 function initApp() {
     try {
@@ -752,35 +761,62 @@ function renderPosts() {
     feed.innerHTML = posts.map(p => postCard(p)).join('');
 }
 
+function commentKey(c) {
+    return c.cid || (c.createdAt || '').replace(/[^a-zA-Z0-9]/g, '_');
+}
+
 function postCard(p) {
-    const curtidas = p.curtidas || {};
-    const liked = currentUser && curtidas[currentUser.uid];
-    const likeCount = Object.keys(curtidas).length;
-    const comments = p.comentarios || [];
+    const reacoes    = p.reacoes || {};
+    const comments   = p.comentarios || [];
     const isExpanded = expandedComments.has(p.id);
     const [bgColor, textColor] = avatarColors(p.autorNome);
+    const myReacao   = currentUser ? reacoes[currentUser.uid]?.emoji : null;
+
+    const reactionBtns = REACOES_POST.map(r => {
+        const count = Object.values(reacoes).filter(x => x.emoji === r.emoji).length;
+        const mine  = myReacao === r.emoji;
+        return `<button onclick="setPostReaction('${p.id}','${r.emoji}')" title="${r.label}"
+            class="flex items-center gap-0.5 px-1.5 py-1 rounded-full text-base transition-all
+            ${mine ? 'bg-rose-100 ring-1 ring-rose-200' : 'opacity-40 hover:opacity-100 hover:bg-stone-100'}">
+            ${r.emoji}${count ? `<span class="text-[11px] font-semibold text-stone-500 leading-none ml-0.5">${count}</span>` : ''}
+        </button>`;
+    }).join('');
 
     const commentsHtml = isExpanded ? `
     <div class="mt-3 pt-3 border-t border-stone-100">
         ${comments.length ? comments.map(c => {
             const [cbg, ctxt] = avatarColors(c.autorNome);
+            const cid = commentKey(c);
+            const creacoes  = cid ? ((p.comentariosReacoes || {})[cid] || {}) : {};
+            const myCreacao = currentUser ? creacoes[currentUser.uid]?.emoji : null;
+            const cBtns = REACOES_POST.map(r => {
+                const cnt  = Object.values(creacoes).filter(x => x.emoji === r.emoji).length;
+                const mine = myCreacao === r.emoji;
+                return `<button onclick="setCommentReaction('${p.id}','${cid}','${r.emoji}')" title="${r.label}"
+                    class="px-1 py-0.5 rounded-full text-sm transition-all leading-none
+                    ${mine ? 'bg-rose-100' : 'opacity-30 hover:opacity-100 hover:bg-stone-100'}">
+                    ${r.emoji}${cnt ? `<span class="text-[10px] text-stone-400 font-semibold">${cnt}</span>` : ''}
+                </button>`;
+            }).join('');
             return `
-            <div class="flex gap-2 mb-2.5">
+            <div class="flex gap-2 mb-3">
                 <div class="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-bold"
                     style="background:${cbg}; color:${ctxt}">${esc(initials(c.autorNome))}</div>
-                <div class="flex-1 bg-stone-50 rounded-xl px-3 py-2">
-                    <span class="text-xs font-semibold text-stone-700">${esc(c.autorNome)}</span>
-                    <span class="text-[10px] text-stone-400 ml-1.5">${relTime(c.createdAt)}</span>
-                    <p class="text-sm text-stone-600 mt-0.5 leading-snug">${esc(c.texto)}</p>
+                <div class="flex-1">
+                    <div class="bg-stone-50 rounded-xl px-3 py-2">
+                        <span class="text-xs font-semibold text-stone-700">${esc(c.autorNome)}</span>
+                        <span class="text-[10px] text-stone-400 ml-1.5">${relTime(c.createdAt)}</span>
+                        <p class="text-sm text-stone-600 mt-0.5 leading-snug">${esc(c.texto)}</p>
+                    </div>
+                    <div class="flex gap-0.5 mt-1 ml-1">${cBtns}</div>
                 </div>
             </div>`;
         }).join('') : '<p class="text-xs text-stone-400 mb-3">Nenhum comentário ainda.</p>'}
-        <div class="flex gap-2 mt-2">
-            <input type="text" id="comment-input-${p.id}" placeholder="Escreva um comentário..."
-                onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();submitComment('${p.id}')}"
-                class="flex-1 px-3 py-2 border border-stone-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-rose-300">
+        <div class="mt-2">
+            <textarea id="comment-input-${p.id}" rows="2" placeholder="Escreva um comentário..."
+                class="w-full px-3 py-2 border border-stone-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-rose-300 resize-none"></textarea>
             <button onclick="submitComment('${p.id}')"
-                class="px-4 py-2 bg-rose-800 text-white text-sm font-medium rounded-xl hover:bg-rose-900 transition-colors">
+                class="mt-2 w-full px-4 py-2 bg-rose-800 text-white text-sm font-medium rounded-xl hover:bg-rose-900 transition-colors">
                 Enviar
             </button>
         </div>
@@ -805,14 +841,10 @@ function postCard(p) {
         </div>
         ${p.texto ? `<p class="text-stone-700 text-sm leading-relaxed whitespace-pre-wrap">${esc(p.texto)}</p>` : ''}
         ${p.imagemUrl ? `<img src="${esc(p.imagemUrl)}" class="mt-3 w-full rounded-xl object-cover max-h-80" loading="lazy">` : ''}
-        <div class="flex items-center gap-5 mt-3 pt-3 border-t border-stone-100">
-            <button onclick="toggleLike('${p.id}')"
-                class="flex items-center gap-1.5 text-sm transition-all ${liked ? 'text-rose-600 font-semibold' : 'text-stone-400 hover:text-rose-500'}">
-                <span class="text-base leading-none">${liked ? '♥' : '♡'}</span>
-                <span>${likeCount || ''}</span>
-            </button>
+        <div class="flex items-center justify-between mt-3 pt-3 border-t border-stone-100">
+            <div class="flex items-center gap-0.5 flex-wrap">${reactionBtns}</div>
             <button onclick="toggleComments('${p.id}')"
-                class="flex items-center gap-1.5 text-sm transition-all ${isExpanded ? 'text-rose-600 font-semibold' : 'text-stone-400 hover:text-rose-500'}">
+                class="flex items-center gap-1.5 text-sm transition-all flex-shrink-0 ml-2 ${isExpanded ? 'text-rose-600 font-semibold' : 'text-stone-400 hover:text-rose-500'}">
                 <span class="text-base leading-none">💬</span>
                 <span>${comments.length || ''}</span>
             </button>
@@ -864,7 +896,7 @@ async function submitPost() {
             autorUid: currentUser.uid,
             autorNome: currentUser.displayName || currentUser.email.split('@')[0],
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-            curtidas: {},
+            reacoes: {},
             comentarios: [],
         };
         if (imagemUrl) post.imagemUrl = imagemUrl;
@@ -882,22 +914,41 @@ async function submitPost() {
     }
 }
 
-async function toggleLike(postId) {
+async function setPostReaction(postId, emoji) {
     if (!db || !currentUser) return;
-    const post = posts.find(p => p.id === postId);
-    const liked = post?.curtidas?.[currentUser.uid];
-    const nome = currentUser.displayName || currentUser.email.split('@')[0];
-    const update = {};
-    if (liked) {
-        update[`curtidas.${currentUser.uid}`] = firebase.firestore.FieldValue.delete();
+    const post    = posts.find(p => p.id === postId);
+    const current = post?.reacoes?.[currentUser.uid]?.emoji;
+    const nome    = currentUser.displayName || currentUser.email.split('@')[0];
+    const update  = {};
+    if (current === emoji) {
+        update[`reacoes.${currentUser.uid}`] = firebase.firestore.FieldValue.delete();
     } else {
-        update[`curtidas.${currentUser.uid}`] = nome;
+        update[`reacoes.${currentUser.uid}`] = { emoji, nome };
     }
     try {
         await db.collection('postagens').doc(postId).update(update);
     } catch (err) {
         console.error(err);
-        toast('Erro ao curtir.');
+        toast('Erro ao reagir.');
+    }
+}
+
+async function setCommentReaction(postId, cid, emoji) {
+    if (!db || !currentUser || !cid) return;
+    const post    = posts.find(p => p.id === postId);
+    const current = post?.comentariosReacoes?.[cid]?.[currentUser.uid]?.emoji;
+    const nome    = currentUser.displayName || currentUser.email.split('@')[0];
+    const update  = {};
+    if (current === emoji) {
+        update[`comentariosReacoes.${cid}.${currentUser.uid}`] = firebase.firestore.FieldValue.delete();
+    } else {
+        update[`comentariosReacoes.${cid}.${currentUser.uid}`] = { emoji, nome };
+    }
+    try {
+        await db.collection('postagens').doc(postId).update(update);
+    } catch (err) {
+        console.error(err);
+        toast('Erro ao reagir.');
     }
 }
 
@@ -920,6 +971,7 @@ async function submitComment(postId) {
     try {
         await db.collection('postagens').doc(postId).update({
             comentarios: firebase.firestore.FieldValue.arrayUnion({
+                cid: Math.random().toString(36).slice(2, 9),
                 texto,
                 autorUid: currentUser.uid,
                 autorNome: nome,

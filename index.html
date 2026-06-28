@@ -261,14 +261,14 @@
                                 &times;
                             </button>
                         </div>
-                        <div class="flex items-center justify-between mt-2">
+                        <div class="mt-2">
+                            <input type="file" id="image-input" accept="image/*" class="hidden" onchange="selectImage(event)">
                             <button onclick="document.getElementById('image-input').click()" type="button"
-                                class="flex items-center gap-1.5 text-stone-400 hover:text-rose-700 text-xs font-medium px-2.5 py-1.5 rounded-lg hover:bg-rose-50 transition-colors">
+                                class="flex items-center gap-1.5 text-stone-400 hover:text-rose-700 text-xs font-medium px-2.5 py-1.5 rounded-lg hover:bg-rose-50 transition-colors mb-2">
                                 🖼️ Imagem
                             </button>
-                            <input type="file" id="image-input" accept="image/*" class="hidden" onchange="selectImage(event)">
                             <button id="post-btn" onclick="submitPost()"
-                                class="px-5 py-2 bg-rose-800 hover:bg-rose-900 text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-60">
+                                class="w-full py-2 bg-rose-800 hover:bg-rose-900 text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-60">
                                 Publicar
                             </button>
                         </div>
